@@ -1,6 +1,21 @@
 import os
+import json
 from typing import Optional, List
-from mcp.server.fastmcp import FastMCP
+
+try:
+    from mcp.server import MCPServer
+    mcp = MCPServer(
+        "Enterprise-User-Onboard-Agent",
+        description="Universal Model Context Protocol Agent for Enterprise Linux User Onboarding (compatible with Claude, Cursor, Antigravity, Windsurf, and VS Code)."
+    )
+except (ImportError, ModuleNotFoundError):
+    try:
+        from mcp.server.mcpserver import MCPServer
+        mcp = MCPServer("Enterprise-User-Onboard-Agent")
+    except (ImportError, ModuleNotFoundError):
+        from mcp.server.fastmcp import FastMCP
+        mcp = FastMCP("Enterprise-User-Onboard-Agent")
+
 from mcp_useronboard.core.connection import HostConnection
 from mcp_useronboard.core.security import EphemeralCredentialVault
 from mcp_useronboard.core.models import UserOnboardingPlan
@@ -9,8 +24,6 @@ from mcp_useronboard.modules.group_manager import GroupManager
 from mcp_useronboard.modules.shell_manager import ShellManager
 from mcp_useronboard.modules.gh_manager import GHManager
 from mcp_useronboard.modules.verifier import PostOnboardingVerifier
-
-mcp = FastMCP("Enterprise-User-Onboard-Agent")
 
 def _resolve_username(user: Optional[str]) -> str:
     return user or os.environ.get("USER") or os.environ.get("USERNAME") or "root"
@@ -34,7 +47,6 @@ def audit_onboarding_contract(target_host: str = "localhost", username: str = ""
         "primary_tool_directory": manifest.acl_path,
         "learned_rules": manifest.learned_rules
     }
-    import json
     return json.dumps(result, indent=2)
 
 @mcp.tool()

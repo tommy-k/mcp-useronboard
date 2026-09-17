@@ -1,9 +1,18 @@
-# 🚀 mcp-useronboard: Enterprise Linux User Onboarding MCP Agent & CLI
+# 🚀 mcp-useronboard: Universal Enterprise Linux User Onboarding MCP Agent & CLI
 
 [![Protocol: MCP](https://img.shields.io/badge/Protocol-Model%20Context%20Protocol-8A2BE2.svg)](https://modelcontextprotocol.io/)
+[![Clients: Universal](https://img.shields.io/badge/Clients-Claude%20%7C%20Cursor%20%7C%20Antigravity%20%7C%20Windsurf%20%7C%20VS%20Code-blue.svg)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-An intelligent, enterprise-grade **Model Context Protocol (MCP)** agent and CLI designed for seamlessly onboarding users onto newly migrated or provisioned **Enterprise Linux** servers (RHEL, Rocky, AlmaLinux, Oracle Linux, Fedora).
+An intelligent, universal **Model Context Protocol (MCP)** agent and CLI designed for seamlessly onboarding users onto newly migrated or provisioned **Enterprise Linux** servers (RHEL, Rocky, AlmaLinux, Oracle Linux, Fedora).
+
+`mcp-useronboard` is **100% client-agnostic**. It works natively with:
+* **Anthropic Claude Desktop** & **Claude Code CLI**
+* **Cursor AI IDE**
+* **Google Antigravity / Gemini CLI**
+* **Windsurf (Codeium Cascade)**
+* **VS Code** (via Continue, Cline, or Roo Code)
+* **Remote SSE / Streamable HTTP** network agents
 
 `mcp-useronboard` consumes the **Onboarding Handover Contract** produced by [`mcp-servermigrate`](https://github.com/tommy-k/mcp-servermigrate), automatically aligning user roles to custom application groups, non-destructively preserving shell preferences, and validating developer credentials.
 
@@ -26,8 +35,9 @@ An intelligent, enterprise-grade **Model Context Protocol (MCP)** agent and CLI 
   * Migrates `~/.config/gh/hosts.yml`, `~/.config/gh/config.yml`, and `~/.gitconfig` while enforcing strict POSIX permissions (`chmod 700 ~/.config/gh`, `chmod 600 hosts.yml`).
   * Runs real-time verification (`gh auth status` and `gh api user`).
   * **Graceful Failure Handling:** If corporate SAML SSO, IP restrictions, or token expiration blocks authentication, it flags a clear non-blocking advisory with exact login instructions (`gh auth login --hostname github.com --web`) to address on the side without halting the rest of onboarding.
-* ⚡ **Dual Operational Modes**
-  * **MCP Agent:** Direct integration with Cursor, Antigravity, or Claude Desktop via stdio.
+* 🌐 **Universal Transport Modes**
+  * **stdio:** Standard I/O subprocess for local agents (Claude Desktop, Cursor, Antigravity, Claude Code).
+  * **SSE (Server-Sent Events) & Streamable HTTP:** For web UIs, remote Claude instances, or network jump-hosts (`mcp-useronboard serve --transport sse --port 8000`).
   * **Interactive CLI:** Rich terminal interface with dry-run support, tables, and spinners.
 
 ---
@@ -72,11 +82,25 @@ pip install -e .
 
 ---
 
-## 🚀 How to Run as an MCP Agent
+## 🔌 Universal MCP Client Configuration
 
-`mcp-useronboard` provides native tools for AI assistants (Cursor, Antigravity, Claude Desktop):
+`mcp-useronboard` includes a built-in helper command to display or generate the exact configuration for any client:
 
-### 1. Cursor / Antigravity Local MCP Configuration (`mcp_config.json` or `.cursor/mcp.json`)
+```bash
+# Print configuration for your specific client
+mcp-useronboard config --client claude
+mcp-useronboard config --client cursor
+mcp-useronboard config --client windsurf
+mcp-useronboard config --client vscode
+mcp-useronboard config --client all
+```
+
+### 1. Anthropic Claude Desktop
+Add this to your `claude_desktop_config.json`:
+* **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+* **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+* **Linux:** `~/.config/Claude/claude_desktop_config.json`
+
 ```json
 {
   "mcpServers": {
@@ -88,21 +112,49 @@ pip install -e .
 }
 ```
 
-### 2. Windows Host Bridging into WSL
+### 2. Anthropic Claude Code CLI
+Add directly via the CLI:
+```bash
+claude mcp add user-onboard -- <path-to-repo>/.venv/bin/python -m mcp_useronboard.server
+```
+
+### 3. Cursor IDE
+In your workspace `.cursor/mcp.json` or global `~/.cursor/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "user-onboard": {
+      "command": "<path-to-repo>/.venv/bin/python",
+      "args": ["-m", "mcp_useronboard.server"]
+    }
+  }
+}
+```
+
+### 4. Windows Host Bridging into WSL (for Claude or Cursor)
+If your AI IDE runs on Windows and the environment is inside WSL:
 ```json
 {
   "mcpServers": {
     "user-onboard": {
       "command": "wsl.exe",
       "args": [
-        "-d", "FedoraLinux-44",
+        "-d", "<your-wsl-distro-name>",
         "bash", "-c",
-        "cd /home/tom/github-repos/mcp-useronboard && source .venv/bin/activate && python -m mcp_useronboard.server"
+        "cd <path-to-repo> && source .venv/bin/activate && python -m mcp_useronboard.server"
       ]
     }
   }
 }
 ```
+
+### 5. Remote SSE / HTTP Network Transport
+To host the agent as a remote HTTP/SSE service for network clients:
+```bash
+mcp-useronboard serve --transport sse --host 0.0.0.0 --port 8000
+```
+
+---
 
 ### 🛠️ Exposed MCP Tools
 
