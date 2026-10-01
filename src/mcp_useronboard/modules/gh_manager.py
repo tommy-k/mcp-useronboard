@@ -45,7 +45,7 @@ class GHManager:
         tgt_home = self._get_user_home(self.target_conn, plan.target_user)
 
         # 1. Ensure target directory structure exists
-        self.target_conn.run_cmd(f"mkdir -p {tgt_home}/.config/gh && chmod 700 {tgt_home}/.config/gh")
+        self.target_conn.run_cmd(f"mkdir -p '{tgt_home}/.config/gh' && chmod 700 '{tgt_home}/.config/gh'")
 
         # 2. Migrate ~/.config/gh/hosts.yml if present
         src_hosts = f"{src_home}/.config/gh/hosts.yml"
@@ -74,9 +74,9 @@ class GHManager:
                 self.target_conn.write_file(tgt_gitcfg, content, mode="644")
                 plan.gitconfig_migrated = True
 
-        # Ensure correct ownership
+        # Ensure correct ownership using trailing colon for primary login group
         self.target_conn.run_cmd(
-            f"chown -R {plan.target_user}:{plan.target_user} {tgt_home}/.config/gh {tgt_home}/.gitconfig 2>/dev/null || true"
+            f"chown -R '{plan.target_user}': '{tgt_home}/.config/gh' '{tgt_home}/.gitconfig' 2>/dev/null || true"
         )
 
         # 5. Verify GitHub CLI on target host
@@ -84,7 +84,6 @@ class GHManager:
 
     def verify_gh_status(self, plan: GHAuthPlan) -> GHAuthPlan:
         """Verifies gh execution and authentication status on target host."""
-        # Check if gh binary is accessible
         gh_bin = self.target_conn.run_cmd("command -v gh || test -x /opt/tools/bin/gh && echo '/opt/tools/bin/gh'").strip()
         if not gh_bin:
             plan.auth_status = "not_installed"
