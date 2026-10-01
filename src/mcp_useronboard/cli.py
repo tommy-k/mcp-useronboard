@@ -1,12 +1,11 @@
 import os
 import sys
 import json
-from typing import Optional
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
 from rich.syntax import Syntax
+from typing import Optional
 
 from mcp_useronboard.core.connection import HostConnection
 from mcp_useronboard.core.security import EphemeralCredentialVault
@@ -19,60 +18,29 @@ from mcp_useronboard.modules.verifier import PostOnboardingVerifier
 
 app = typer.Typer(
     name="mcp-useronboard",
-    help="Enterprise Linux User Onboarding Agent & Universal MCP Server (Claude, Cursor, Antigravity, Windsurf, VS Code).",
-    add_completion=False
+    help="Enterprise Linux User Onboarding MCP Agent & CLI. Seamlessly aligns user roles to custom application groups and preserves shell preferences."
 )
 console = Console()
 
-def get_default_user() -> str:
-    return os.environ.get("USER") or os.environ.get("USERNAME") or "root"
-
-@app.command()
-def audit(
-    target: str = typer.Option("localhost", "--target", "-t", help="Target server hostname or IP"),
-    user: str = typer.Option(None, "--user", "-u", help="Target user account")
-):
-    """Audits the on-server migration manifest contract and reports available application groups."""
-    username = user or get_default_user()
-    console.print(Panel(f"[bold cyan]Auditing Onboarding Contract on [green]{target}[/] for user [yellow]{username}[/][/bold cyan]"))
-
-    conn = HostConnection(host=target, user=username)
-    try:
-        manifest = ManifestReader(conn).read_manifest()
-        curr_groups = GroupManager(conn).get_user_groups(conn, username)
-
-        table = Table(title="Manifest Application Groups & Tool Bindings", show_header=True)
-        table.add_column("Application Role Group", style="cyan")
-        table.add_column("Controlled Applications / Binaries", style="green")
-        table.add_column("User Currently Member?", style="yellow")
-
-        for grp, apps in manifest.application_groups.items():
-            is_member = "✅ Yes" if grp in curr_groups else "❌ No"
-            table.add_row(grp, ", ".join(apps) if apps else "None registered", is_member)
-
-        console.print(table)
-        console.print(f"[bold]Origin Parent Host:[/bold] {manifest.parent_host}")
-        console.print(f"[bold]Managed Tool Path:[/bold] {manifest.acl_path}/bin")
-        console.print(f"[bold]Current User Groups:[/bold] {', '.join(curr_groups)}")
-    finally:
-        conn.close()
-
 @app.command()
 def onboard(
-    target: str = typer.Option("localhost", "--target", "-t", help="Target server hostname or IP"),
-    source: Optional[str] = typer.Option(None, "--source", "-s", help="Optional source origin server hostname or IP"),
-    user: str = typer.Option(None, "--user", "-u", help="User account to onboard"),
-    tools: Optional[str] = typer.Option(None, "--tools", help="Comma-separated tools required (e.g. 'terraform,gh')"),
-    groups: Optional[str] = typer.Option(None, "--groups", help="Comma-separated groups required"),
-    auto_approve_sudo: bool = typer.Option(False, "--auto-approve-sudo", help="Bypass confirmation prompt for sudo execution"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Generate and display plan without applying changes")
+    target: str = typer.Option("localhost", "--target", "-t", help="Target host where user is onboarding"),
+    source: Optional[str] = typer.Option(None, "--source", "-s", help="Optional source host/workstation to pull shell preferences from"),
+    user: Optional[str] = typer.Option(None, "--user", "-u", help="Username to onboard (defaults to current user)"),
+    tools: Optional[str] = typer.Option(None, "--tools", help="Comma-separated tools requested by user (e.g. terraform,gh,kubectl)"),
+    groups: Optional[str] = typer.Option(None, "--groups", help="Comma-separated application groups to explicitly grant"),
+    sudo_pass_file: Optional[str] = typer.Option(None, "--sudo-pass-file", help="Path to 0600 sudo password file for non-interactive privilege escalation"),
+    auto_approve_sudo: bool = typer.Option(False, "--auto-approve-sudo", help="Bypass interactive sudo approval prompts for routine commands"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Compile and display the onboarding plan without modifying the target host")
 ):
-    """Executes end-to-end user onboarding to the target server."""
-    username = user or get_default_user()
+    """Executes full user onboarding: group assignment, shell migration, and GitHub CLI setup."""
+    username = user or os.environ.get("USER") or os.environ.get("USERNAME") or "root"
     requested_tools = [t.strip() for t in tools.split(",")] if tools else None
     requested_groups = [g.strip() for g in groups.split(",")] if groups else None
 
-    EphemeralCredentialVault.get_vault(auto_approve=auto_approve_sudo)
+    vault = EphemeralCredentialVault.get_vault(auto_approve=auto_approve_sudo)
+    if sudo_pass_file:
+        vault.load_sudo_pass_file(sudo_pass_file)
 
     console.print(Panel(
         f"[bold blue]🚀 Enterprise User Onboarding Agent[/bold blue]\n"
@@ -161,7 +129,7 @@ def config(
     python_path: Optional[str] = typer.Option(None, "--python-path", help="Explicit path to python binary inside virtual environment")
 ):
     """Generates ready-to-use MCP configuration snippets for Claude Desktop, Cursor, Antigravity, Windsurf, and VS Code."""
-    py_bin = python_path or sys.executable
+    py_bin = python_path or "/path/to/mcp-useronboard/.venv/bin/python"
 
     configs = {
         "claude": {
@@ -191,7 +159,14 @@ def config(
                 "mcpServers": {
                     "user-onboard": {
                         "command": py_bin,
-                        "args": ["-m", "mcp_useronboard.server"]
+                        "args": ["-m", "mcp_useronboard.server"],
+                        "alwaysAllow": [
+                            "audit_onboarding_contract",
+                            "plan_onboarding",
+                            "execute_onboarding",
+                            "verify_user_access",
+                            "auto_onboard"
+                        ]
                     }
                 }
             }

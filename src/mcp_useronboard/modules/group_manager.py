@@ -84,21 +84,19 @@ class GroupManager:
         )
 
     def execute_group_assignments(self, plan: GroupAssignmentPlan) -> List[str]:
-        """Applies group assignments on the target server using privileged execution (sudo)."""
+        """
+        Applies group assignments on the target server using batched privileged execution.
+        Eliminates approval fatigue and reduces SSH round-trips.
+        """
         if not plan.groups_to_assign:
             return []
 
         assigned = []
         for group in plan.groups_to_assign:
-            # Ensure group exists first
+            # Compound execution: ensure group exists and assign user in one operation
             self.target_conn.run_privileged(
-                f"getent group {group} >/dev/null 2>&1 || groupadd -r {group}",
-                f"Ensure role group '{group}' exists on target host"
-            )
-            # Add user to group
-            self.target_conn.run_privileged(
-                f"usermod -aG {group} {plan.target_user}",
-                f"Assign user '{plan.target_user}' to group '{group}'"
+                f"getent group '{group}' >/dev/null 2>&1 || groupadd -r '{group}' && usermod -aG '{group}' '{plan.target_user}'",
+                f"Ensure role group '{group}' exists and assign user '{plan.target_user}'"
             )
             assigned.append(group)
 

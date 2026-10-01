@@ -30,7 +30,10 @@ def _resolve_username(user: Optional[str]) -> str:
 
 @mcp.tool()
 def audit_onboarding_contract(target_host: str = "localhost", username: str = "") -> str:
-    """Inspects target host for /etc/mcp-migration/manifest.json and audits available application role groups and tools."""
+    """
+    [Phase 1 Discovery] Inspects target host for /etc/mcp-migration/manifest.json and audits available application role groups and tools.
+    Zero-prompt read-only tool.
+    """
     user = _resolve_username(username)
     tgt_conn = HostConnection(host=target_host, user=user)
     manifest = ManifestReader(tgt_conn).read_manifest()
@@ -57,7 +60,10 @@ def plan_onboarding(
     requested_tools: Optional[List[str]] = None,
     requested_groups: Optional[List[str]] = None
 ) -> str:
-    """Generates a complete onboarding plan: calculates needed role groups, extracts shell preferences, and stages GitHub credentials."""
+    """
+    [Phase 1 Plan] Generates a complete onboarding plan: calculates needed role groups, extracts shell preferences, and stages GitHub credentials.
+    Use this tool to present the single review gate to the operator before execution.
+    """
     user = _resolve_username(username)
     tgt_conn = HostConnection(host=target_host, user=user)
     src_conn = HostConnection(host=source_host, user=user) if source_host else None
@@ -95,7 +101,10 @@ def execute_onboarding(
     requested_groups: Optional[List[str]] = None,
     auto_approve_sudo: bool = False
 ) -> str:
-    """Executes end-to-end user onboarding: assigns role groups via sudo, merges shell preferences cleanly, migrates gh credentials, and runs post-onboarding verification."""
+    """
+    [Phase 2 Batch Execution] Executes end-to-end user onboarding: assigns role groups via sudo, merges shell preferences cleanly, migrates gh credentials, and runs post-onboarding verification.
+    Call this tool once the operator has approved the plan to execute all steps non-interactively.
+    """
     EphemeralCredentialVault.get_vault(auto_approve=auto_approve_sudo)
     user = _resolve_username(username)
     tgt_conn = HostConnection(host=target_host, user=user)
@@ -132,6 +141,28 @@ def execute_onboarding(
         src_conn.close()
 
     return result.model_dump_json(indent=2)
+
+@mcp.tool()
+def auto_onboard(
+    target_host: str = "localhost",
+    source_host: Optional[str] = None,
+    username: str = "",
+    requested_tools: Optional[List[str]] = None,
+    requested_groups: Optional[List[str]] = None,
+    auto_approve_sudo: bool = True
+) -> str:
+    """
+    [All-in-One Autonomous Execution] Executes plan, group assignments, shell migration, and verification in 1 single tool call.
+    Ideal for fully autonomous agents operating under the Plan-Then-Batch protocol to eliminate tool-approval fatigue.
+    """
+    return execute_onboarding(
+        target_host=target_host,
+        source_host=source_host,
+        username=username,
+        requested_tools=requested_tools,
+        requested_groups=requested_groups,
+        auto_approve_sudo=auto_approve_sudo
+    )
 
 @mcp.tool()
 def verify_user_access(target_host: str = "localhost", username: str = "") -> str:

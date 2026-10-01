@@ -136,15 +136,14 @@ class ShellManager:
         self.target_conn.write_file(temp_path, new_content, mode="644")
 
         # Run syntax check: bash -n <file>
-        check_cmd = f"bash -n {temp_path} 2>&1"
+        check_cmd = f"bash -n '{temp_path}' 2>&1"
         check_res = self.target_conn.run_cmd(check_cmd).strip()
 
         if check_res:
-            # Syntax error! Clean up temp and abort
-            self.target_conn.run_cmd(f"rm -f {temp_path}")
+            self.target_conn.run_cmd(f"rm -f '{temp_path}'")
             raise SyntaxError(f"Shell migration aborted: syntax validation failed for ~/.bashrc: {check_res}")
 
-        # Move verified file into place
-        self.target_conn.run_cmd(f"mv {temp_path} {target_path} && chmod 644 {target_path} && chown {plan.target_user}:{plan.target_user} {target_path} 2>/dev/null || true")
+        # Move verified file into place and assign user's primary login group (trailing colon)
+        self.target_conn.run_cmd(f"mv '{temp_path}' '{target_path}' && chmod 644 '{target_path}' && chown '{plan.target_user}': '{target_path}' 2>/dev/null || true")
         plan.syntax_verified = True
         return True
