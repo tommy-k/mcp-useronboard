@@ -30,6 +30,12 @@ class GroupAssignmentPlan(BaseModel):
     assigned_groups: List[str] = Field(default_factory=list)
     session_refresh_guidance: str = ""
 
+class HomeScriptItem(BaseModel):
+    relative_path: str
+    source_path: str
+    target_path: str
+    mode: str = "0750"
+
 class ShellConfigPlan(BaseModel):
     target_user: str
     target_shell_file: str = "~/.bashrc"
@@ -37,6 +43,8 @@ class ShellConfigPlan(BaseModel):
     migrated_aliases: List[str] = Field(default_factory=list)
     migrated_env_vars: Dict[str, str] = Field(default_factory=dict)
     migrated_custom_blocks: List[str] = Field(default_factory=list)
+    personal_scripts: List[HomeScriptItem] = Field(default_factory=list)
+    migrated_home_scripts: List[str] = Field(default_factory=list)
     syntax_verified: bool = False
 
 class GHAuthPlan(BaseModel):

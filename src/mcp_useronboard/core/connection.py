@@ -127,3 +127,43 @@ class HostConnection:
             self.run_privileged(write_cmd, f"Write file {path}")
         else:
             self.run_cmd(write_cmd)
+
+    def read_bytes(self, path: str) -> Optional[bytes]:
+        """Reads raw bytes from a file for byte-for-byte personal script migration."""
+        if self.is_local:
+            if not os.path.exists(path):
+                return None
+            with open(path, "rb") as f:
+                return f.read()
+        self.connect()
+        assert self._ssh_client is not None
+        try:
+            sftp = self._ssh_client.open_sftp()
+            try:
+                with sftp.open(path, "rb") as f:
+                    return f.read()
+            finally:
+                sftp.close()
+        except Exception:
+            import base64
+            b64_out = self.run_cmd(f"base64 -w0 '{path}' 2>/dev/null").strip()
+            return base64.b64decode(b64_out) if b64_out else None
+
+    def write_bytes(self, path: str, data: bytes, mode: str = "0750", privileged: bool = False) -> None:
+        """Writes raw bytes to a file, creating parent directories and setting mode."""
+        parent = path.rsplit("/", 1)[0]
+        if self.is_local and not privileged:
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(data)
+            os.chmod(path, int(mode, 8))
+            return
+
+        import base64
+        b64_content = base64.b64encode(data).decode("ascii")
+        cmd = f"mkdir -p '{parent}' && echo '{b64_content}' | base64 -d > '{path}' && chmod {mode} '{path}'"
+        if privileged:
+            self.run_privileged(cmd, f"Write binary file {path}")
+        else:
+            self.run_cmd(cmd)

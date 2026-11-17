@@ -2,13 +2,16 @@ import re
 from datetime import datetime, timezone
 from typing import Optional, List, Dict
 from mcp_useronboard.core.connection import HostConnection
-from mcp_useronboard.core.models import ShellConfigPlan
+from mcp_useronboard.core.models import ShellConfigPlan, HomeScriptItem
 
 BLOCK_START = "# >>> mcp-useronboard managed block >>>"
 BLOCK_END = "# <<< mcp-useronboard managed block <<<"
 
+HOME_SCRIPT_DIRS = ("bin", ".local/bin", "scripts")
+
+
 class ShellManager:
-    """Manages safe, non-destructive migration of user shell preferences (~/.bashrc, aliases, prompt)."""
+    """Manages safe, non-destructive migration of user shell preferences (~/.bashrc, aliases, prompt) and personal ~ scripts."""
 
     def __init__(self, target_conn: HostConnection, source_conn: Optional[HostConnection] = None):
         self.target_conn = target_conn
@@ -34,6 +37,41 @@ class ShellManager:
                     return content
         return ""
 
+    def discover_personal_scripts(self, username: str) -> List[HomeScriptItem]:
+        """
+        Discovers personal scripts/binaries in the migrating user's home directories
+        (~/bin, ~/.local/bin, ~/scripts) on source_conn.
+        Only runs when migrating from a source host; brand-new users have nothing copied.
+        """
+        if not self.source_conn:
+            return []
+
+        src_home = self._get_user_home(self.source_conn, username).rstrip("/")
+        tgt_home = self._get_user_home(self.target_conn, username).rstrip("/")
+        search_dirs = " ".join(f"'{src_home}/{d}'" for d in HOME_SCRIPT_DIRS)
+
+        raw_lines = self.source_conn.run_cmd(
+            f"find {search_dirs} -maxdepth 2 -type f -exec stat -c '%a|%n' {{}} + 2>/dev/null"
+        ).splitlines()
+
+        scripts: List[HomeScriptItem] = []
+        for line in raw_lines:
+            line = line.strip()
+            if "|" not in line:
+                continue
+            mode_str, src_path = line.split("|", 1)
+            src_path = src_path.strip()
+            if not src_path.startswith(src_home + "/"):
+                continue
+            rel_path = src_path[len(src_home) + 1:]
+            scripts.append(HomeScriptItem(
+                relative_path=rel_path,
+                source_path=src_path,
+                target_path=f"{tgt_home}/{rel_path}",
+                mode=mode_str.strip() or "0750",
+            ))
+        return scripts
+
     def parse_shell_preferences(self, raw_shell: str) -> Dict[str, List[str]]:
         """Parses aliases, environment variables, and custom functions/prompts from shell script."""
         aliases: List[str] = []
@@ -42,19 +80,15 @@ class ShellManager:
 
         for line in raw_shell.splitlines():
             line_str = line.strip()
-            # Ignore comments and empty lines
             if not line_str or line_str.startswith("#"):
                 continue
 
-            # Check for aliases
             if line_str.startswith("alias "):
                 aliases.append(line_str)
-            # Check for exports (excluding generic PATH overrides that clobber enterprise baselines)
             elif line_str.startswith("export "):
                 if "PATH=" in line_str and "/opt/tools" in line_str:
-                    continue  # already managed by /etc/profile.d/corp-standards.sh
+                    continue  # /opt/tools binaries are published via /usr/local/bin symlinks
                 exports.append(line_str)
-            # Check for prompt customizations or completions
             elif any(line_str.startswith(k) for k in ["PS1=", "eval \"$(starship", "eval \"$(oh-my-posh", "source <(gh completion"]):
                 custom_lines.append(line_str)
 
@@ -65,9 +99,10 @@ class ShellManager:
         }
 
     def plan_shell_migration(self, username: str) -> ShellConfigPlan:
-        """Plans non-destructive shell migration for user."""
+        """Plans non-destructive shell and personal ~ script migration for user."""
         raw_source = self.read_source_shell_content(username)
         parsed = self.parse_shell_preferences(raw_source)
+        personal_scripts = self.discover_personal_scripts(username)
 
         env_dict = {}
         for exp in parsed["exports"]:
@@ -81,14 +116,30 @@ class ShellManager:
             migrated_aliases=parsed["aliases"],
             migrated_env_vars=env_dict,
             migrated_custom_blocks=parsed["custom"],
+            personal_scripts=personal_scripts,
             syntax_verified=False
         )
 
     def execute_shell_migration(self, plan: ShellConfigPlan) -> bool:
-        """Backs up existing target ~/.bashrc, merges preferences inside an idempotent block,
-        and verifies bash syntax before finalizing."""
+        """
+        Backs up existing target ~/.bashrc, migrates personal ~ scripts byte-for-byte,
+        merges preferences inside an idempotent block, and verifies bash syntax before finalizing.
+        """
         home = self._get_user_home(self.target_conn, plan.target_user)
         target_path = f"{home}/.bashrc"
+
+        # 0. Copy personal ~ scripts byte-for-byte if migrating from a source server
+        migrated_scripts: List[str] = []
+        if self.source_conn and plan.personal_scripts:
+            for item in plan.personal_scripts:
+                raw_bytes = self.source_conn.read_bytes(item.source_path)
+                if raw_bytes is not None:
+                    self.target_conn.write_bytes(item.target_path, raw_bytes, mode=item.mode)
+                    self.target_conn.run_cmd(
+                        f"chown '{plan.target_user}': '{item.target_path}' 2>/dev/null || true"
+                    )
+                    migrated_scripts.append(item.target_path)
+        plan.migrated_home_scripts = migrated_scripts
 
         # 1. Create timestamped backup if target file exists
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -97,7 +148,6 @@ class ShellManager:
         existing_content = ""
         if self.target_conn.file_exists(target_path):
             existing_content = self.target_conn.read_file(target_path) or ""
-            # Save backup
             self.target_conn.write_file(backup_path, existing_content, mode="644")
             plan.backup_path = backup_path
 
@@ -105,8 +155,12 @@ class ShellManager:
         block_lines = [
             BLOCK_START,
             f"# Auto-migrated by mcp-useronboard on {datetime.now(timezone.utc).isoformat()}",
-            "# Preserves personal aliases and preferences without overriding /etc/profile.d/ standards."
+            "# Preserves personal aliases, preferences, and user ~/bin PATH without overriding system baselines."
         ]
+
+        if plan.personal_scripts:
+            block_lines.append("\n# Personal Home Script Paths")
+            block_lines.append('export PATH="$HOME/bin:$HOME/.local/bin:$HOME/scripts:$PATH"')
 
         if plan.migrated_aliases:
             block_lines.append("\n# Personal Aliases")
@@ -135,7 +189,6 @@ class ShellManager:
         temp_path = f"{home}/.bashrc.onboard_tmp"
         self.target_conn.write_file(temp_path, new_content, mode="644")
 
-        # Run syntax check: bash -n <file>
         check_cmd = f"bash -n '{temp_path}' 2>&1"
         check_res = self.target_conn.run_cmd(check_cmd).strip()
 
@@ -144,6 +197,8 @@ class ShellManager:
             raise SyntaxError(f"Shell migration aborted: syntax validation failed for ~/.bashrc: {check_res}")
 
         # Move verified file into place and assign user's primary login group (trailing colon)
-        self.target_conn.run_cmd(f"mv '{temp_path}' '{target_path}' && chmod 644 '{target_path}' && chown '{plan.target_user}': '{target_path}' 2>/dev/null || true")
+        self.target_conn.run_cmd(
+            f"mv '{temp_path}' '{target_path}' && chmod 644 '{target_path}' && chown '{plan.target_user}': '{target_path}' 2>/dev/null || true"
+        )
         plan.syntax_verified = True
         return True
