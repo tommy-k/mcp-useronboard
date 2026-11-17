@@ -1,3 +1,4 @@
+import base64
 from typing import Dict, Any, List
 from mcp_useronboard.core.connection import HostConnection
 from mcp_useronboard.core.models import (
@@ -14,11 +15,12 @@ class PostOnboardingVerifier:
         self.target_conn = target_conn
 
     def _run_as_user_login_shell(self, username: str, inner_cmd: str) -> str:
-        """Runs a verification command inside the target user's login shell, not as root."""
+        """Runs a verification script inside the target user's login shell without outer-shell expansion."""
+        b64 = base64.b64encode(inner_cmd.encode("utf-8")).decode("ascii")
         if self.target_conn.user == username:
-            return self.target_conn.run_cmd(f"bash -lc '{inner_cmd}'")
+            return self.target_conn.run_cmd(f"bash -lc 'echo {b64} | base64 -d | bash'")
         return self.target_conn.run_privileged(
-            f"su -s /bin/bash -l '{username}' -c \"{inner_cmd}\"",
+            f"su -s /bin/bash -l '{username}' -c 'echo {b64} | base64 -d | bash'",
             f"Verify command as user '{username}' in login shell"
         )
 
@@ -50,11 +52,17 @@ class PostOnboardingVerifier:
         accessible_tools: Dict[str, bool] = {}
         tool_paths: Dict[str, str] = {}
         for tool in all_tools:
-            check_out = self._run_as_user_login_shell(
-                username,
-                f"resolved=$(command -v '{tool}') && test -x \"$resolved\" && echo \"EXECUTABLE:$resolved\" || echo 'NOT_EXECUTABLE'"
-            ).strip()
-            is_ok = "EXECUTABLE:" in check_out and "NOT_EXECUTABLE" not in check_out
+            inner_script = (
+                f"resolved=$(command -v '{tool}') || {{ echo 'NOT_EXECUTABLE'; exit 0; }}\n"
+                f"test -x \"$resolved\" || {{ echo 'NOT_EXECUTABLE'; exit 0; }}\n"
+                f"if ldd \"$resolved\" >/dev/null 2>&1 && ldd \"$resolved\" | grep -q 'not found'; then\n"
+                f"  echo 'MISSING_LIBS'\n"
+                f"  exit 0\n"
+                f"fi\n"
+                f"echo \"EXECUTABLE:$resolved\""
+            )
+            check_out = self._run_as_user_login_shell(username, inner_script).strip()
+            is_ok = "EXECUTABLE:" in check_out and "NOT_EXECUTABLE" not in check_out and "MISSING_LIBS" not in check_out
             accessible_tools[tool] = is_ok
             if is_ok:
                 for line in check_out.splitlines():

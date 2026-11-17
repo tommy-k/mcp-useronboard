@@ -17,7 +17,7 @@ def test_verifier_runs_as_actual_user_and_checks_path():
         "/home/alice" if "eval echo" in cmd else ""
     )
     tgt_conn.run_privileged.side_effect = lambda cmd, just="": (
-        "EXECUTABLE:/usr/local/bin/gh" if "'gh'" in cmd else "NOT_EXECUTABLE"
+        "EXECUTABLE:/usr/local/bin/gh" if tgt_conn.run_privileged.call_count == 1 else "NOT_EXECUTABLE"
     )
 
     manifest = OnboardingManifest(
@@ -34,9 +34,9 @@ def test_verifier_runs_as_actual_user_and_checks_path():
 
     result = PostOnboardingVerifier(tgt_conn).verify(plan, manifest)
 
-    # Verified via su -l 'alice' (NOT as root)
+    # Verified via su -l 'alice' with base64-encoded script (no outer-shell expansion)
     priv_cmds = [c.args[0] for c in tgt_conn.run_privileged.mock_calls]
-    assert any("su -s /bin/bash -l 'alice'" in c and "command -v 'gh'" in c for c in priv_cmds)
+    assert any("su -s /bin/bash -l 'alice'" in c and "base64 -d | bash" in c for c in priv_cmds)
 
     # gh succeeded, terraform failed -> overall success must be False!
     assert result.verification_output["tools_accessible"]["gh"] is True
