@@ -135,8 +135,9 @@ class ShellManager:
                 raw_bytes = self.source_conn.read_bytes(item.source_path)
                 if raw_bytes is not None:
                     self.target_conn.write_bytes(item.target_path, raw_bytes, mode=item.mode)
+                    parent_dir = item.target_path.rsplit("/", 1)[0]
                     self.target_conn.run_cmd(
-                        f"chown '{plan.target_user}': '{item.target_path}' 2>/dev/null || true"
+                        f"chown '{plan.target_user}': '{parent_dir}' '{item.target_path}' 2>/dev/null || true"
                     )
                     migrated_scripts.append(item.target_path)
         plan.migrated_home_scripts = migrated_scripts
